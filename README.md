@@ -6,7 +6,7 @@ Live: https://builtbysai.com/old-games/
 
 ## Games
 
-- Word Beater — coming
+- **Word Beater** (`word-beater/`) — type the word before the ring runs out. JS rebuild of the LÖVE/Lua original, word lists verbatim.
 - Square — coming
 - Simon Says — coming
 

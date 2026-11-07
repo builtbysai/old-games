@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Word Beater — JS rebuild</title>
+<style>
+  :root{
+    --ink:#e8ecff; --dim:#8b93b8; --faint:#5a6180;
+    --green:#4ade80; --amber:#fbbf24; --red:#f87171;
+    --panel:rgba(10,12,20,.72); --line:rgba(232,236,255,.14);
+    --bg:#0e1320;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden;background:var(--bg)}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;color:var(--ink);
+    -webkit-user-select:none;user-select:none;overscroll-behavior:none}
+  #stars{position:fixed;inset:0;display:block}
+  #app{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+    padding:calc(12px + env(safe-area-inset-top)) 16px calc(14px + env(safe-area-inset-bottom));}
+  .col{width:100%;max-width:560px;display:flex;flex-direction:column;align-items:center;flex:1;min-height:0}
+
+  /* ---------- HUD ---------- */
+  header{width:100%;display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+  .scores{font-weight:800;letter-spacing:.14em;font-size:12px;line-height:1.55}
+  .scores b{font-size:21px;letter-spacing:.02em}
+  .scores .best{color:var(--dim);font-weight:600}
+  .lvl{text-align:right;font-weight:800;letter-spacing:.12em;font-size:12px;line-height:1.55}
+  .lvl b{font-size:15px}
+  .lvl .name{color:var(--dim);font-weight:700}
+  .btns{display:flex;gap:8px;margin-top:2px}
+  .pill{border:1px solid var(--line);background:var(--panel);color:var(--ink);
+    font:700 12px/1 inherit;letter-spacing:.08em;padding:10px 12px;border-radius:999px;cursor:pointer;
+    backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);min-width:44px;min-height:38px}
+  .pill:active{transform:scale(.96)}
+
+  /* ---------- Ring + word ---------- */
+  #stage{flex:1;min-height:0;width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+  #ringWrap{position:relative;width:min(72vw,300px);aspect-ratio:1;flex:none}
+  #ringWrap svg{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg)}
+  #ringWrap circle{fill:none;stroke-linecap:round}
+  .track{stroke:rgba(232,236,255,.10);stroke-width:5}
+  #arcLevel{stroke:var(--green);stroke-width:5;transition:stroke-dashoffset .35s ease, stroke .35s ease}
+  #arcCd{stroke:var(--green);stroke-width:11;transition:stroke .2s linear}
+  #wordBox{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+  #word{display:flex;flex-wrap:wrap;justify-content:center;gap:0;padding:0 18px;
+    font-weight:800;font-size:clamp(26px,8.4vw,44px);letter-spacing:.04em;line-height:1.15;text-align:center}
+  #word .ch{color:rgba(232,236,255,.38);transition:color .08s}
+  #word .ch.ok{color:var(--green)}
+  #word .ch.bad{color:var(--red)}
+  #word .ch.cur{color:var(--ink);text-decoration:underline;text-underline-offset:6px;text-decoration-thickness:3px;text-decoration-color:var(--ink)}
+  #word.shake{animation:shake .28s}
+  @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-7px)}50%{transform:translateX(6px)}75%{transform:translateX(-3px)}}
+  #cd{font-weight:800;font-size:15px;letter-spacing:.18em;color:var(--green)}
+  #cd.warn{color:var(--amber)} #cd.crit{color:var(--red)}
+  #cdLabel{font-size:10px;letter-spacing:.28em;color:var(--faint);font-weight:700}
+
+  /* ---------- Upcoming words ---------- */
+  #upNext{width:100%;max-width:420px;text-align:center}
+  #upNext .cap{font-size:10px;letter-spacing:.28em;color:var(--faint);font-weight:700;margin-bottom:6px}
+  #upNext .w{font-size:15px;line-height:1.9;color:var(--dim);font-weight:600}
+  #upNext .w b{color:var(--ink)}
+  #upNext .w .done{color:var(--faint);text-decoration:line-through}
+  #levelBar{width:100%;max-width:420px;height:4px;border-radius:2px;background:rgba(232,236,255,.10);overflow:hidden;margin-top:12px}
+  #levelFill{height:100%;width:0%;background:var(--green);border-radius:2px;transition:width .35s ease, background .35s ease}
+
+  /* ---------- Input ---------- */
+  #inputWrap{width:100%;max-width:420px;margin-top:14px;flex:none}
+  #type{width:100%;border:2px solid rgba(232,236,255,.22);background:rgba(22,30,53,.85);color:var(--ink);
+    font:700 19px/1.2 inherit;text-align:center;padding:15px 14px;border-radius:999px;outline:none;
+    letter-spacing:.05em;caret-color:var(--green)}
+  #type:focus{border-color:#f0fff0;box-shadow:0 0 0 3px rgba(74,222,128,.25)}
+  #type::placeholder{color:var(--faint);font-weight:600;font-size:15px}
+  #hint{margin-top:8px;text-align:center;font-size:12px;color:var(--faint);letter-spacing:.06em;min-height:15px}
+  #hint.warn{color:var(--amber)}
+
+  /* ---------- Toast ---------- */
+  #toast{position:fixed;left:50%;top:18%;transform:translate(-50%,-8px);z-index:30;pointer-events:none;
+    background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:12px 20px;
+    font-weight:800;letter-spacing:.14em;font-size:14px;opacity:0;transition:opacity .25s, transform .25s;white-space:nowrap}
+  #toast.show{opacity:1;transform:translate(-50%,0)}
+
+  /* ---------- Screens ---------- */
+  .screen{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;padding:24px;text-align:center;background:rgba(7,8,13,.72);backdrop-filter:blur(3px)}
+  .screen[hidden]{display:none}
+  .screen h1{font-size:clamp(34px,10vw,52px);letter-spacing:.08em}
+  .screen h1.red{color:var(--red)}
+  .screen .tag{color:var(--dim);line-height:1.6;max-width:420px;font-size:15px}
+  .screen .stats{display:flex;gap:26px;margin:6px 0}
+  .screen .stats div{font-size:12px;letter-spacing:.14em;color:var(--dim);font-weight:700}
+  .screen .stats b{display:block;font-size:26px;color:var(--ink);letter-spacing:0;margin-top:4px}
+  .bigbtn{border:none;background:var(--ink);color:#0e1320;font:800 15px/1 inherit;letter-spacing:.12em;
+    padding:16px 30px;border-radius:999px;cursor:pointer}
+  .bigbtn:active{transform:scale(.97)}
+  .keys{font-size:13px;color:var(--faint);line-height:1.9}
+  .keys b{color:var(--dim)}
+  .credit{position:absolute;bottom:calc(16px + env(safe-area-inset-bottom));font-size:12px;color:var(--faint);letter-spacing:.08em}
+</style>
+</head>
+<body>
+<canvas id="stars"></canvas>
+<div id="app">
+  <div class="col">
+    <header>
+      <div class="scores">SCORE <b id="score">0</b><br><span class="best">BEST <span id="best">0</span></span></div>
+      <div class="lvl"><b id="levelLabel">LEVEL 1</b><br><span class="name" id="levelName">WARM UP</span></div>
+      <div class="btns">
+        <button class="pill" id="pauseBtn" aria-label="Pause">II</button>
+        <button class="pill" id="muteBtn" aria-label="Sound">SOUND ON</button>
+      </div>
+    </header>
+
+    <div id="stage">
+      <div id="ringWrap">
+        <svg viewBox="0 0 300 300" aria-hidden="true">
+          <circle class="track" cx="150" cy="150" r="138"/>
+          <circle id="arcLevel" cx="150" cy="150" r="138"/>
+          <circle class="track" cx="150" cy="150" r="112" style="stroke-width:11"/>
+          <circle id="arcCd" cx="150" cy="150" r="112"/>
+        </svg>
+        <div id="wordBox">
+          <div id="word"></div>
+          <div id="cd">4</div>
+          <div id="cdLabel">SECONDS</div>
+        </div>
+      </div>
+
+      <div id="upNext">
+        <div class="cap">UP NEXT</div>
+        <div class="w" id="nextWords"></div>
+        <div id="levelBar"><div id="levelFill"></div></div>
+      </div>
+    </div>
+
+    <div id="inputWrap">
+      <input id="type" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+        placeholder="Tap here, then type the word" aria-label="Type the word">
+      <div id="hint">Type the word above to begin</div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<div class="screen" id="startScr">
+  <h1>WORD<br>BEATER</h1>
+  <p class="tag">Type each word before the ring runs out. A word beaten fast scores more. Run out of time and the run ends.</p>
+  <button class="bigbtn" id="startBtn">TAP TO START</button>
+  <p class="keys"><b>Levels:</b> Warm Up &middot; Long Words &middot; Code<br><b>P</b> pause &middot; <b>M</b> mute</p>
+  <p class="credit">! Made with passion by Hans</p>
+</div>
+
+<div class="screen" id="overScr" hidden>
+  <h1 class="red">TIME UP</h1>
+  <div class="stats">
+    <div>SCORE<b id="finalScore">0</b></div>
+    <div>BEST<b id="finalBest">0</b></div>
+    <div>WORDS<b id="finalWords">0</b></div>
+    <div>ACCURACY<b id="finalAcc">0%</b></div>
+  </div>
+  <button class="bigbtn" id="retryBtn">TAP TO RETRY</button>
+  <p class="keys">The clock beat you that time.</p>
+</div>
+
+<div class="screen" id="pauseScr" hidden>
+  <h1>PAUSED</h1>
+  <p class="tag">The clock is stopped.</p>
+  <button class="bigbtn" id="resumeBtn">RESUME</button>
+</div>
+
+<script>
+"use strict";
+/* ================= Word lists — Hans's, verbatim ================= */
+const WORDS = [
+  ["lily","lily","next","short","nice","bottle","full","soda","vast","glue","close","hurry","robin","trace","rock","absent","cover","note","burst","relax","group","sad","rob","yell","pop","mix","fix","hot","pin","hill","wiry","dirt"],
+  ["paddle","answer","awesome","distance","fertile","wakeful","belief","slippery","bizarre","learned","vivacious","grandmother","illegal","thirsty","wholesale","tenuous","skillful","deteriorate","poised","humorous","scrape","replace","languid","adjoining","interesting","stranger","polite","scissors","brainy","interrogation"],
+  ["return;","#include","'helloworld'","obj:1","call()","<html>","not_easy","more-dashes","camelCase","ASCII","array[]","printf('')","</html>","^regex$","System.out.println()"]
+];
+const LEVEL_NAMES = ["WARM UP", "LONG WORDS", "CODE"];
+const TICK_MS = 750;            /* 1 countdown per 0.75s, like the original */
+const BEST_KEY = "wordbeater_best", MUTE_KEY = "wordbeater_muted";
+
+/* ================= State ================= */
+let state = "start";            /* start | play | pause | over */
+let level = 1, pointer = 1;     /* 1-based, like the original */
+let word = WORDS[0][0];
+let maxCd = 4, elapsedMs = 0;   /* countdown derived from elapsedMs */
+let score = 0, best = +(localStorage.getItem(BEST_KEY) || 0);
+let wordsTyped = 0, correctChars = 0, totalChars = 0;
+let arcProgress = 0;            /* 0..1 through the current level */
+let muted = localStorage.getItem(MUTE_KEY) === "1";
+let lastTs = performance.now(), toastTimer = 0;
+
+/* ================= DOM ================= */
+const $ = id => document.getElementById(id);
+const input = $("type"), wordEl = $("word"), cdEl = $("cd"), hintEl = $("hint"),
+  scoreEl = $("score"), bestEl = $("best"), levelLabel = $("levelLabel"),
+  levelNameEl = $("levelName"), nextEl = $("nextWords"), fillEl = $("levelFill"),
+  arcLevel = $("arcLevel"), arcCd = $("arcCd"), toastEl = $("toast"),
+  startScr = $("startScr"), overScr = $("overScr"), pauseScr = $("pauseScr"),
+  muteBtn = $("muteBtn"), pauseBtn = $("pauseBtn");
+const CIRC_L = 2 * Math.PI * 138, CIRC_C = 2 * Math.PI * 112;
+arcLevel.style.strokeDasharray = CIRC_L; arcCd.style.strokeDasharray = CIRC_C;
+arcLevel.style.strokeDashoffset = CIRC_L; arcCd.style.strokeDashoffset = 0;
+bestEl.textContent = best;
+
+/* ================= Audio ================= */
+let AC = null;
+function ensureAudio(){
+  if (!AC){ try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+  if (AC && !muted && AC.state === "suspended") AC.resume().catch(()=>{});
+}
+function suspendAudio(){ if (AC && AC.state === "running") AC.suspend().catch(()=>{}); }
+function resumeAudio(){ if (AC && !muted && AC.state === "suspended") AC.resume().catch(()=>{}); }
+function tone(f, dur, type, vol, when){
+  if (!AC || muted) return;
+  try{
+    const t = AC.currentTime + (when || 0);
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = type || "sine"; o.frequency.value = f;
+    g.gain.setValueAtTime(vol || .12, t);
+    g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + dur + .02);
+  }catch(e){}
+}
+const sfx = {
+  key(){ tone(1250, .04, "sine", .05); },
+  word(){ tone(660, .09, "sine", .14); tone(880, .12, "sine", .14, .07); },
+  level(){ [523,659,784,1046].forEach((f,i)=>tone(f,.12,"sine",.13,i*.08)); },
+  error(){ tone(160, .09, "square", .07); },
+  over(){ tone(110, .4, "sawtooth", .12); tone(70, .5, "sine", .14, .05); }
+};
+function applyMute(){
+  muted = !muted;
+  localStorage.setItem(MUTE_KEY, muted ? "1" : "0");
+  muteBtn.textContent = muted ? "MUTED" : "SOUND ON";
+  if (muted) suspendAudio(); else resumeAudio();
+}
+muteBtn.textContent = muted ? "MUTED" : "SOUND ON";
+document.addEventListener("visibilitychange", ()=> document.hidden ? suspendAudio() : resumeAudio());
+window.addEventListener("blur", suspendAudio);
+window.addEventListener("focus", resumeAudio);
+window.addEventListener("pagehide", suspendAudio);
+
+/* ================= Starfield (port of Hans's Stars entity) ================= */
+const cv = $("stars"), cx = cv.getContext("2d");
+let stars = [], ptr = {x:0, y:0}, vel = {x:0, y:0, tx:0, ty:0};
+function sizeStars(){
+  cv.width = innerWidth; cv.height = innerHeight;
+  const n = Math.min(220, Math.floor((innerWidth + innerHeight) / 8));
+  stars = [];
+  for (let i = 0; i < n; i++)
+    stars.push({x: Math.random()*cv.width, y: Math.random()*cv.height, z: .2 + Math.random()*.8, a: .4 + Math.random()*.6});
+  ptr.x = cv.width/2; ptr.y = cv.height/2;
+}
+addEventListener("resize", sizeStars); sizeStars();
+addEventListener("pointermove", e => {
+  const ox = (ptr.x - e.clientX)/100, oy = (ptr.y - e.clientY)/100;
+  vel.tx += ox; vel.ty += oy; ptr.x = e.clientX; ptr.y = e.clientY;
+});
+function drawStars(dt){
+  vel.tx *= .96; vel.ty *= .96;
+  vel.x += (vel.tx - vel.x) * .8; vel.y += (vel.ty - vel.y) * .8;
+  cx.clearRect(0, 0, cv.width, cv.height);
+  for (const s of stars){
+    s.x += vel.x * s.z + (s.x - cv.width/2) * .0005 * s.z;
+    s.y += vel.y * s.z + (s.y - cv.height/2) * .0005 * s.z;
+    s.z += .001;
+    if (s.x < -50 || s.x > cv.width+50 || s.y < -50 || s.y > cv.height+50 || s.z > 3){
+      s.z = .2 + Math.random()*.8; s.x = Math.random()*cv.width; s.y = Math.random()*cv.height;
+    }
+    cx.globalAlpha = s.a * (.75 + .25 * Math.sin(performance.now()/400 + s.x));
+    cx.fillStyle = "#fff";
+    cx.beginPath(); cx.arc(s.x, s.y, s.z*2, 0, 7); cx.fill();
+  }
+  cx.globalAlpha = 1;
+}
+
+/* ================= Game ================= */
+function countdown(){ return Math.max(0, maxCd - Math.floor(elapsedMs / TICK_MS)); }
+function hueFor(f){ /* green -> yellow -> red, like the original arc */
+  return f < .5 ? 120 - f*120 : 60 - (f-.5)*120;
+}
+function renderWord(){
+  const val = input.value;
+  wordEl.innerHTML = "";
+  let bad = -1;
+  for (let i = 0; i < word.length; i++){
+    const s = document.createElement("span");
+    s.className = "ch"; s.textContent = word[i];
+    if (i < val.length){
+      if (val[i] === word[i]) s.classList.add("ok");
+      else { s.classList.add("bad"); if (bad < 0) bad = i; }
+    } else if (i === val.length) s.classList.add("cur");
+    wordEl.appendChild(s);
+  }
+  return bad;
+}
+let lastNextKey = "";
+function renderNext(){
+  const key = level + ":" + pointer;
+  if (key === lastNextKey) return;
+  lastNextKey = key;
+  const list = WORDS[level-1], out = [];
+  for (let i = pointer; i < Math.min(pointer+4, list.length); i++)
+    out.push(i === pointer ? "<b>" + esc(list[i]) + "</b>" : esc(list[i]));
+  nextEl.innerHTML = out.join(" &nbsp;&middot;&nbsp; ") || "&mdash;";
+}
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function renderHud(){
+  scoreEl.textContent = score; bestEl.textContent = best;
+  levelLabel.textContent = "LEVEL " + level;
+  levelNameEl.textContent = LEVEL_NAMES[level-1];
+  const f = countdown() / maxCd;
+  cdEl.textContent = countdown();
+  cdEl.className = f > .5 ? "" : f > .25 ? "warn" : "crit";
+  /* countdown ring drains smoothly over the word's total time */
+  arcCd.style.strokeDashoffset = CIRC_C * (elapsedMs / (maxCd*TICK_MS));
+  arcCd.style.stroke = f > .5 ? "var(--green)" : f > .25 ? "var(--amber)" : "var(--red)";
+  arcLevel.style.strokeDashoffset = CIRC_L * (1 - arcProgress);
+  arcLevel.style.stroke = "hsl(" + hueFor(arcProgress) + ",85%,60%)";
+  fillEl.style.width = (arcProgress*100) + "%";
+  fillEl.style.background = "hsl(" + hueFor(arcProgress) + ",85%,60%)";
+  renderNext();
+}
+function setWord(w){
+  word = w; maxCd = Math.min(w.length, 4); elapsedMs = 0;
+  input.value = ""; input.dataset.prev = ""; renderWord(); renderHud();
+}
+function toast(msg){
+  toastEl.textContent = msg; toastEl.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(()=>toastEl.classList.remove("show"), 1600);
+}
+function startGame(){
+  ensureAudio();
+  state = "play"; level = 1; pointer = 1; score = 0;
+  wordsTyped = 0; correctChars = 0; totalChars = 0; arcProgress = 0;
+  startScr.hidden = true; overScr.hidden = true; pauseScr.hidden = true;
+  hintEl.textContent = "Type the word above to begin"; hintEl.classList.remove("warn");
+  setWord(WORDS[0][0]);
+  input.focus();
+}
+function wordComplete(){
+  const left = countdown();
+  score += left; wordsTyped++;
+  if (score > best) best = score;
+  arcProgress = Math.min(1, arcProgress + (1 / WORDS[level-1].length) * (left / maxCd));
+  sfx.word();
+  const list = WORDS[level-1];
+  pointer++;
+  if (pointer > list.length) levelUp();
+  else setWord(list[pointer-1]);
+}
+function levelUp(){
+  if (score > best) best = score;
+  localStorage.setItem(BEST_KEY, best);
+  sfx.level();
+  level = level % WORDS.length + 1; pointer = 1; arcProgress = 0;
+  toast("LEVEL " + level + " — " + LEVEL_NAMES[level-1]);
+  setWord(WORDS[level-1][0]);
+}
+function timeUp(){
+  state = "over"; sfx.over();
+  if (score > best) best = score;
+  localStorage.setItem(BEST_KEY, best);
+  $("finalScore").textContent = score;
+  $("finalBest").textContent = best;
+  $("finalWords").textContent = wordsTyped;
+  $("finalAcc").textContent = (totalChars ? Math.round(correctChars/totalChars*100) : 100) + "%";
+  overScr.hidden = false;
+  input.blur();
+}
+function togglePause(){
+  if (state === "play"){ state = "pause"; pauseScr.hidden = false; }
+  else if (state === "pause"){ state = "play"; pauseScr.hidden = true; input.focus(); }
+}
+
+/* input: live per-letter feedback */
+input.addEventListener("input", ()=>{
+  if (state !== "play") return;
+  ensureAudio();
+  let v = input.value;
+  if (v.length > word.length){ v = v.slice(0, word.length); input.value = v; }
+  const prev = input.dataset.prev || "";
+  if (v.length > prev.length){           /* a char was typed */
+    totalChars++;
+    if (v[v.length-1] === word[v.length-1]){ correctChars++; sfx.key(); }
+  }
+  input.dataset.prev = v;
+  const bad = renderWord();
+  if (bad >= 0){
+    sfx.error();
+    wordEl.classList.remove("shake"); void wordEl.offsetWidth; wordEl.classList.add("shake");
+  }
+  if (v === word) wordComplete();
+  renderHud();
+});
+input.addEventListener("focus", ()=>{ if (state === "play"){ hintEl.textContent = "Type the word above to begin"; hintEl.classList.remove("warn"); } });
+input.addEventListener("blur", ()=>{ if (state === "play"){ hintEl.textContent = "Tap the box to resume the clock"; hintEl.classList.add("warn"); } });
+
+/* buttons + keys */
+$("startBtn").addEventListener("click", startGame);
+$("retryBtn").addEventListener("click", startGame);
+$("resumeBtn").addEventListener("click", togglePause);
+pauseBtn.addEventListener("click", ()=>{ ensureAudio(); togglePause(); });
+muteBtn.addEventListener("click", applyMute);
+startScr.addEventListener("click", e => { if (e.target === startScr) startGame(); });
+overScr.addEventListener("click", e => { if (e.target === overScr) startGame(); });
+document.addEventListener("keydown", e => {
+  const typing = document.activeElement === input;
+  /* P / M are word letters too — only treat them as shortcuts when the
+     player is NOT typing in the box (e.g. after clicking a button). */
+  if ((e.key === "p" || e.key === "P") && !typing){ if (state === "play" || state === "pause") togglePause(); return; }
+  if ((e.key === "m" || e.key === "M") && !typing){ applyMute(); return; }
+  if (e.key === "Escape"){ if (state === "play" || state === "pause") togglePause(); return; }
+  if (e.key === "Enter" && (state === "start" || state === "over")){ startGame(); return; }
+  if (state === "play" && !typing && e.key.length === 1) input.focus();
+});
+
+/* main loop: countdown ticks only while playing AND the input is focused */
+function loop(ts){
+  const dt = Math.min(100, ts - lastTs); lastTs = ts;
+  drawStars(dt);
+  if (state === "play" && document.activeElement === input){
+    elapsedMs += dt;
+    if (countdown() <= 0){ renderHud(); timeUp(); }
+    else renderHud();
+  }
+  requestAnimationFrame(loop);
+}
+renderWord(); renderHud();
+requestAnimationFrame(loop);
+
+/* ================= Debug hook ================= */
+window.__wb = {
+  get state(){ return state; },
+  get score(){ return score; }, get best(){ return best; },
+  get level(){ return level; }, get levelName(){ return LEVEL_NAMES[level-1]; },
+  get currentWord(){ return word; }, get countdown(){ return countdown(); },
+  get countdownMax(){ return maxCd; }, get wordsTyped(){ return wordsTyped; },
+  get accuracy(){ return totalChars ? Math.round(correctChars/totalChars*100) : 100; },
+  get pointer(){ return pointer; }, get levelLen(){ return WORDS[level-1].length; },
+  get audioState(){ return AC ? AC.state : "none"; },
+  get muted(){ return muted; },
+  get input(){ return input; },
+  words: WORDS,
+  start: startGame,
+  setInput(s){ input.value = s; input.dispatchEvent(new Event("input", {bubbles:true})); },
+  forceCountdown(n){ elapsedMs = (maxCd - n) * TICK_MS; renderHud(); },
+  pause: togglePause
+};
+</script>
+</body>
+</html>

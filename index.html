@@ -10,12 +10,22 @@
   body{max-width:720px;margin:0 auto;padding:64px 20px 40px}
   h1{font-size:34px;letter-spacing:.06em}
   p.sub{color:#8b93b8;margin:10px 0 36px;line-height:1.6}
+  a.card{display:block;text-decoration:none;color:inherit;border:1px solid rgba(232,236,255,.14);border-radius:14px;padding:20px 22px;background:rgba(255,255,255,.02)}
+  a.card:hover{border-color:rgba(232,236,255,.35)}
+  a.card h2{font-size:20px;letter-spacing:.04em}
+  a.card p{color:#8b93b8;margin-top:8px;line-height:1.55;font-size:15px}
+  a.card span{color:#4ade80;font-weight:700;font-size:13px;letter-spacing:.08em}
   .foot{margin-top:40px;color:#5a6180;font-size:13px}
 </style>
 </head>
 <body>
   <h1>OLD GAMES</h1>
   <p class="sub">Hans's early games, rebuilt in JavaScript and improved. One at a time, played in the browser.</p>
-  <p class="foot">Word Beater coming next. Then Square, Simon Says.</p>
+  <a class="card" href="word-beater/">
+    <h2>Word Beater</h2>
+    <p>Type the word before the ring runs out. Three levels, from warm-up words to code.</p>
+    <p style="margin-top:12px"><span>PLAY &rarr;</span></p>
+  </a>
+  <p class="foot">Square coming next. Then Simon Says.</p>
 </body>
 </html>
