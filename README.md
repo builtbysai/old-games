@@ -6,7 +6,6 @@ Live: https://builtbysai.com/old-games/
 
 ## Games
 
-- **Bigger Balls** (`bigger-balls/`) — eat smaller balls to get big, avoid bigger ones. JS rebuild of the 2019 LÖVE/Lua original. Drag to steer, FIRE to shoot.
 - Word Beater — coming
 - Square — coming
 - Simon Says — coming
