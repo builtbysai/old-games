@@ -8,6 +8,6 @@ Live: https://builtbysai.com/old-games/
 
 - **Word Beater** (`word-beater/`) — type the word before the ring runs out. JS rebuild of the LÖVE/Lua original, word lists verbatim.
 - **Square** (`square/`) — take the coin, dodge the crossing squares. JS rebuild of the LÖVE/Lua original.
-- Simon Says — coming
+- **Simon Says** (`simon-says/`) — watch the sequence, repeat it. JS rebuild of the LÖVE/Lua original.
 
 The originals stay archived in their own private repos (`builtbysai/bigger-balls`, `builtbysai/word-beater`, `builtbysai/square`, `builtbysai/simon-says`).
