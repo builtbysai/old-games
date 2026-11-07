@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>The Square — JS rebuild</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden;background:#120e1a}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    color:#f2eef7;-webkit-user-select:none;user-select:none;touch-action:none;overscroll-behavior:none}
+  #app{height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:10px}
+  #topbar{width:100%;max-width:560px;display:flex;justify-content:space-between;align-items:center;min-height:40px}
+  #topbar .ttl{font-weight:800;letter-spacing:.22em;font-size:13px;color:#c9b8e0}
+  .btns{display:flex;gap:8px}
+  .pill{border:1px solid rgba(242,238,247,.18);background:rgba(255,255,255,.05);color:#f2eef7;
+    font:700 12px/1 inherit;letter-spacing:.08em;padding:10px 13px;border-radius:999px;cursor:pointer;min-width:44px;text-align:center}
+  .pill:active{background:rgba(255,255,255,.14)}
+  #wrap{position:relative;line-height:0}
+  #game{display:block;touch-action:none;border-radius:6px}
+  #menu{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;pointer-events:none;text-align:center;padding:0 18px;transition:opacity .4s}
+  #menu.gone{opacity:0}
+  #menu h1{font-size:clamp(30px,9vw,44px);letter-spacing:.14em;font-weight:800;text-shadow:0 2px 18px rgba(0,0,0,.55);line-height:1.05}
+  #menu p{font-size:15px;color:#efe9f7;text-shadow:0 1px 10px rgba(0,0,0,.6);line-height:1.5}
+  #menu .go{font-size:12px;letter-spacing:.18em;color:#e8d5a8;font-weight:700}
+  #flash{position:absolute;inset:0;background:#ff2a2a;opacity:0;pointer-events:none;border-radius:6px}
+  #pauseScr{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+    background:rgba(10,6,18,.72);border-radius:6px;z-index:3}
+  #pauseScr h2{font-size:24px;letter-spacing:.14em}
+  #pauseScr p{font-size:14px;color:#c9b8e0}
+  #below{width:100%;max-width:560px;text-align:center}
+  #best{font-size:15px;font-weight:700;letter-spacing:.06em;color:#e8ecff}
+  #hint{font-size:12.5px;color:#8b7fa8;margin-top:6px;line-height:1.5}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <div class="ttl">THE SQUARE</div>
+    <div class="btns">
+      <button class="pill" id="muteBtn" aria-label="toggle sound">SOUND ON</button>
+      <button class="pill" id="pauseBtn" aria-label="pause">&#10074;&#10074;</button>
+    </div>
+  </div>
+  <div id="wrap">
+    <canvas id="game"></canvas>
+    <div id="flash"></div>
+    <div id="menu">
+      <h1>THE SQUARE</h1>
+      <p id="menuLine">Use arrow keys to take the coin</p>
+      <div class="go">FIRST COIN STARTS THE GAME</div>
+    </div>
+    <div id="pauseScr"><h2>PAUSED</h2><p>Press P to continue</p></div>
+  </div>
+  <div id="below">
+    <div id="best">Best: 0</div>
+    <div id="hint">Arrows / WASD or swipe to move &middot; tap a neighboring cell to step into it &middot; gold is good, red is death</div>
+  </div>
+</div>
+<script>
+"use strict";
+/* The Square — JS rebuild of Hans's 2019 LÖVE game (based on lessmilk's "the square").
+   Virtual board 500x500, same geometry as the original: player 40x40 on a 3x3 grid
+   (cells at 166/230/294, 64px pitch), coins 25x25, enemies 25x25 at 200px/s. */
+const V = 500;                 // virtual board size
+const CELL = 64, POS = [166, 230, 294];
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const menuEl = document.getElementById('menu');
+const menuLine = document.getElementById('menuLine');
+const flashEl = document.getElementById('flash');
+const pauseScr = document.getElementById('pauseScr');
+const bestEl = document.getElementById('best');
+const muteBtn = document.getElementById('muteBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+const IS_TOUCH = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+if (IS_TOUCH) menuLine.textContent = 'Swipe on the screen to take the coin';
+
+let boardPx = 300, dpr = 1;
+function fit() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const availW = Math.min(window.innerWidth * 0.94, 560);
+  const availH = window.innerHeight - 190;
+  boardPx = Math.max(260, Math.min(availW, availH));
+  canvas.style.width = boardPx + 'px';
+  canvas.style.height = boardPx + 'px';
+  canvas.width = Math.round(boardPx * dpr);
+  canvas.height = Math.round(boardPx * dpr);
+}
+window.addEventListener('resize', fit);
+fit();
+
+/* ---------- audio ---------- */
+let AC = null, muted = localStorage.getItem('square_muted') === '1';
+function ensureAudio() {
+  if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  if (AC && AC.state === 'suspended' && !muted) AC.resume().catch(() => {});
+}
+function tone(f0, f1, dur, type, vol) {
+  if (!AC || muted) return;
+  try {
+    const t = AC.currentTime, o = AC.createOscillator(), g = AC.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(f0, t);
+    if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(f1, 1), t + dur);
+    g.gain.setValueAtTime(vol || 0.12, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(AC.destination); o.start(t); o.stop(t + dur + 0.02);
+  } catch (e) {}
+}
+const sfx = {
+  move()   { tone(300, 260, 0.05, 'triangle', 0.05); },
+  pickup() { tone(880, 1320, 0.12, 'sine', 0.14); setTimeout(() => tone(1320, 1760, 0.1, 'sine', 0.1), 50); },
+  warn()   { tone(440, 440, 0.06, 'square', 0.05); },
+  hit()    { tone(160, 40, 0.35, 'sawtooth', 0.2); tone(90, 30, 0.4, 'sine', 0.22); },
+  start()  { tone(523, 784, 0.15, 'sine', 0.12); }
+};
+function applyMute() {
+  muteBtn.textContent = muted ? 'SOUND OFF' : 'SOUND ON';
+  if (muted && AC && AC.state === 'running') AC.suspend().catch(() => {});
+  if (!muted && AC && AC.state === 'suspended') AC.resume().catch(() => {});
+}
+muteBtn.textContent = muted ? 'SOUND OFF' : 'SOUND ON';
+function suspendAudio() { if (AC && AC.state === 'running') AC.suspend().catch(() => {}); }
+function resumeAudio() { if (AC && AC.state === 'suspended' && !muted) AC.resume().catch(() => {}); }
+document.addEventListener('visibilitychange', () => document.hidden ? suspendAudio() : resumeAudio());
+window.addEventListener('blur', suspendAudio);
+window.addEventListener('focus', resumeAudio);
+window.addEventListener('pagehide', suspendAudio);
+
+/* ---------- state ---------- */
+let state = 'menu';            // 'menu' | 'play' | 'pause'
+let score = 0, best = +(localStorage.getItem('square_best') || 0);
+let player = { col: 0, row: 2, x: POS[0], y: POS[2], moving: false };
+let coins = [], enemies = [], telegraphs = [];
+let nextEnemyAt = 0, hitAt = -10, graceUntil = 0, flash = 0, shakeT = 0;
+let now = 0;                   // game clock (seconds, pauses with the game)
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+const cellXY = (c, r) => ({ x: POS[c], y: POS[r] });
+
+function freeCells() {
+  const out = [];
+  for (let c = 0; c < 3; c++) for (let r = 0; r < 3; r++) {
+    if (c === player.col && r === player.row) continue;
+    if (coins.some(k => k.col === c && k.row === r)) continue;
+    out.push({ col: c, row: r });
+  }
+  return out;
+}
+function addCoin(col, row) {
+  let cell;
+  if (col !== undefined && row !== undefined) {
+    if (coins.some(k => k.col === col && k.row === row)) return;  // no duplicates
+    cell = { col, row };
+  }
+  else { const f = freeCells(); if (!f.length) return; cell = pick(f); }
+  const p = cellXY(cell.col, cell.row);
+  coins.push({ col: cell.col, row: cell.row, x: p.x, y: p.y, spin: Math.random() * Math.PI * 2, grow: 0 });
+}
+function resetRun() {
+  player = { col: 0, row: 2, x: POS[0], y: POS[2], moving: false };
+  coins = []; enemies = []; telegraphs = [];
+  score = 0; nextEnemyAt = 0; hitAt = -10; graceUntil = 0; flash = 0;
+  state = 'menu';
+  menuEl.classList.remove('gone');
+  for (let i = 0; i < 3; i++) addCoin();
+  bestEl.textContent = 'Best: ' + best;
+}
+function saveBest() {
+  if (score > best) best = score;
+  localStorage.setItem('square_best', String(best));
+  bestEl.textContent = 'Best: ' + best;
+}
+function persistBest() { localStorage.setItem('square_best', String(best)); }
+window.addEventListener('pagehide', persistBest);
+document.addEventListener('visibilitychange', () => { if (document.hidden) persistBest(); });
+
+/* ---------- movement ---------- */
+function tween(obj, to, dur, done) {
+  const from = { x: obj.x, y: obj.y }, t0 = performance.now();
+  (function step() {
+    const k = Math.min((performance.now() - t0) / (dur * 1000), 1);
+    obj.x = from.x + (to.x - from.x) * k;
+    obj.y = from.y + (to.y - from.y) * k;
+    if (k < 1) requestAnimationFrame(step); else if (done) done();
+  })();
+}
+function move(dx, dy) {
+  if (state === 'pause' || player.moving) return;
+  ensureAudio();
+  const nc = player.col + dx, nr = player.row + dy;
+  if (nc < 0 || nc > 2 || nr < 0 || nr > 2) {   // bump: out a third and back
+    player.moving = true;
+    const bx = player.x + dx * (40 / 3), by = player.y + dy * (40 / 3);
+    tween(player, { x: bx, y: by }, 0.1, () => tween(player, { x: POS[player.col], y: POS[player.row] }, 0.1, () => { player.moving = false; }));
+    return;
+  }
+  player.col = nc; player.row = nr;
+  player.moving = true;
+  sfx.move();
+  tween(player, cellXY(nc, nr), 0.1, () => { player.moving = false; });
+}
+function moveDir(d) {
+  if (d === 'up') move(0, -1); else if (d === 'down') move(0, 1);
+  else if (d === 'left') move(-1, 0); else if (d === 'right') move(1, 0);
+}
+
+/* ---------- enemies ---------- */
+const PATTERNS = [ // 12, as the original: from left/right/top/bottom, straight or diagonal
+  { vx: -1, vy: -1, ver: true }, { vx: -1, vy: 0, ver: true }, { vx: -1, vy: 1, ver: true },
+  { vx: 1, vy: -1, ver: true }, { vx: 1, vy: 0, ver: true }, { vx: 1, vy: 1, ver: true },
+  { vx: -1, vy: -1, ver: false }, { vx: 0, vy: -1, ver: false }, { vx: 1, vy: -1, ver: false },
+  { vx: -1, vy: 1, ver: false }, { vx: 0, vy: 1, ver: false }, { vx: 1, vy: 1, ver: false }
+];
+function enemySpeed() { return 200 + Math.min(score, 40) / 40 * 80; }          // 200 -> 280 px/s
+function spawnDelay() { return Math.max(1.3 - 0.8 * score / 40, 0.5); }         // 1.3s -> 0.5s
+function planEnemy(pat) {
+  const sp = enemySpeed();
+  // Faithful to the original: the cross-axis component stays ±1 px/s, so each
+  // enemy sweeps a full row or column (y/x in {186, 250, 314}) and every one
+  // of the nine cells stays dangerous. (The original's "diagonal" patterns
+  // have the same near-straight behaviour — vy is never scaled there.)
+  let x, y, vx, vy;
+  if (pat.ver) {
+    x = V / 2 + pat.vx * 64 + pat.vx * 190;
+    y = V / 2 + pat.vy * 64;
+    vx = -pat.vx * sp; vy = pat.vy;
+  } else {
+    x = V / 2 + pat.vx * 64;
+    y = V / 2 + pat.vy * 64 + pat.vy * 190;
+    vx = pat.vx; vy = -pat.vy * sp;
+  }
+  return { x, y, vx, vy, entryX: Math.max(0, Math.min(V, x)), entryY: Math.max(0, Math.min(V, y)) };
+}
+function queueEnemy(pat) {
+  const p = planEnemy(pat || pick(PATTERNS));
+  telegraphs.push({ x: p.x, y: p.y, vx: p.vx, vy: p.vy, ex: p.entryX, ey: p.entryY, t: 0.4 });
+  sfx.warn();
+}
+function spawnEnemyOnCourse() { // debug: an enemy whose path crosses the player's cell
+  const pc = { x: player.x + 20, y: player.y + 20 };
+  const cands = PATTERNS.filter(p => {
+    const q = planEnemy(p);
+    // path crosses player center? check distance from center to the enemy's line
+    const dx = q.vx, dy = q.vy, len = Math.hypot(dx, dy);
+    const ux = dx / len, uy = dy / len;
+    const rx = pc.x - q.x, ry = pc.y - q.y;
+    const along = rx * ux + ry * uy;
+    const px = q.x + ux * along, py = q.y + uy * along;
+    return along > 0 && Math.hypot(pc.x - px, pc.y - py) < 24;
+  });
+  const pat = cands.length ? pick(cands) : { vx: -1, vy: 0, ver: true };
+  const q = planEnemy(pat);
+  enemies.push({ x: q.x, y: q.y, vx: q.vx, vy: q.vy, age: 0 });
+}
+function onHit() {
+  enemies = []; telegraphs = [];
+  saveBest();
+  score = 0;
+  hitAt = now; graceUntil = now + 1;
+  nextEnemyAt = now + 0.8;                 // a beat before enemies resume
+  flash = 1; shakeT = 0.25;
+  sfx.hit();
+  if (navigator.vibrate) { try { navigator.vibrate(120); } catch (e) {} }
+}
+function aabb(ax, ay, aw, ah, bx, by, bw, bh) {
+  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+}
+
+/* ---------- update ---------- */
+let lastT = performance.now();
+function update(dt) {
+  now += dt;
+  if (flash > 0) flash = Math.max(0, flash - dt * 2.2);
+  if (shakeT > 0) shakeT -= dt;
+  for (const c of coins) { c.spin += dt * 3; c.grow = Math.min(1, c.grow + dt * 2); }
+  // telegraphs -> enemies
+  for (let i = telegraphs.length - 1; i >= 0; i--) {
+    telegraphs[i].t -= dt;
+    if (telegraphs[i].t <= 0) {
+      const t = telegraphs.splice(i, 1)[0];
+      enemies.push({ x: t.x, y: t.y, vx: t.vx, vy: t.vy, age: 0 });
+    }
+  }
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const e = enemies[i];
+    e.age += dt; e.x += e.vx * dt; e.y += e.vy * dt;
+    if (e.x < -60 || e.x > V + 60 || e.y < -60 || e.y > V + 60) { enemies.splice(i, 1); continue; }
+    if (e.age >= 0.3 && now >= graceUntil && aabb(e.x, e.y, 25, 25, player.x, player.y, 40, 40)) { onHit(); break; }  // onHit clears enemies — stop iterating
+  }
+  // coins
+  for (let i = coins.length - 1; i >= 0; i--) {
+    const c = coins[i];
+    if (aabb(c.x, c.y, 25, 25, player.x, player.y, 40, 40)) {
+      coins.splice(i, 1);
+      score++;
+      if (score > best) { best = score; persistBest(); }
+      sfx.pickup();
+      if (navigator.vibrate) { try { navigator.vibrate(15); } catch (e) {} }
+      addCoin();
+      if (state === 'menu') { state = 'play'; menuEl.classList.add('gone'); sfx.start(); }
+    }
+  }
+  // enemy spawner (only once the menu has ended)
+  if (state === 'play' && now >= nextEnemyAt) {
+    nextEnemyAt = now + spawnDelay();
+    queueEnemy();
+  }
+  bestEl.textContent = 'Best: ' + best;
+}
+
+/* ---------- render ---------- */
+function draw() {
+  const s = canvas.width / V;   // backing px per virtual unit
+  ctx.setTransform(s, 0, 0, s, 0, 0);
+  if (shakeT > 0) ctx.translate(rand(-4, 4), rand(-4, 4));
+  ctx.clearRect(0, 0, V, V);
+  // board: white outer, purple inner
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, V, V);
+  ctx.fillStyle = '#9b59b6'; ctx.fillRect(10, 10, V - 20, V - 20);
+  // grid lines
+  ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.lineWidth = 2;
+  for (let i = 1; i < 3; i++) {
+    ctx.beginPath(); ctx.moveTo(10 + i * 160, 10); ctx.lineTo(10 + i * 160, V - 10); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(10, 10 + i * 160); ctx.lineTo(V - 10, 10 + i * 160); ctx.stroke();
+  }
+  // big faint score, center (as the original)
+  if (state !== 'menu') {
+    ctx.fillStyle = 'rgba(255,255,255,.13)';
+    ctx.font = '800 130px -apple-system, "Segoe UI", Roboto, Arial, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(score), V / 2, V / 2 + 6);
+  }
+  // telegraphs: pulsing edge marker + dashed path
+  for (const t of telegraphs) {
+    const pulse = 0.55 + 0.45 * Math.sin(now * 22);
+    ctx.strokeStyle = 'rgba(255,60,60,' + (0.35 + 0.4 * pulse) + ')';
+    ctx.lineWidth = 3; ctx.setLineDash([8, 8]);
+    ctx.beginPath(); ctx.moveTo(t.ex, t.ey); ctx.lineTo(t.ex + t.vx * 1.6, t.ey + t.vy * 1.6); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255,45,45,' + (0.5 + 0.5 * pulse) + ')';
+    ctx.save(); ctx.translate(t.ex, t.ey);
+    ctx.rotate(Math.atan2(t.vy, t.vx));
+    ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(-10, -12); ctx.lineTo(-10, 12); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  // coins: gold, spinning, gently pulsing
+  for (const c of coins) {
+    const cx = c.x + 12.5, cy = c.y + 12.5;
+    const grow = 0.4 + 0.6 * c.grow, pulse = 1 + 0.07 * Math.sin(now * 4 + c.spin);
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(Math.sin(c.spin) * 0.5); ctx.scale(grow * pulse, grow * pulse);
+    ctx.fillStyle = '#FFDF00';
+    ctx.shadowColor = 'rgba(255,223,0,.8)'; ctx.shadowBlur = 14;
+    ctx.fillRect(-12.5, -12.5, 25, 25);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.fillRect(-12.5, -12.5, 25, 6);
+    ctx.restore();
+  }
+  // enemies: dark blue-grey with a red edge
+  for (const e of enemies) {
+    ctx.fillStyle = '#34495E';
+    ctx.shadowColor = 'rgba(255,45,45,.55)'; ctx.shadowBlur = 10;
+    ctx.fillRect(e.x, e.y, 25, 25);
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#ff3b30'; ctx.lineWidth = 2.5;
+    ctx.strokeRect(e.x + 1, e.y + 1, 23, 23);
+  }
+  // player: white square, blinking during post-hit grace
+  const blink = now < graceUntil && Math.floor(now * 10) % 2 === 0;
+  ctx.globalAlpha = blink ? 0.35 : 1;
+  ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = 'rgba(255,255,255,.7)'; ctx.shadowBlur = 16;
+  ctx.fillRect(player.x, player.y, 40, 40);
+  ctx.shadowBlur = 0;
+  ctx.globalAlpha = 1;
+  // hit flash
+  flashEl.style.opacity = flash > 0 ? String(flash * 0.55) : '0';
+}
+function loop(t) {
+  const dt = Math.min((t - lastT) / 1000, 0.05);
+  lastT = t;
+  if (state !== 'pause') update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+/* ---------- input ---------- */
+const DIRS = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };
+window.addEventListener('keydown', e => {
+  if (DIRS[e.code]) { e.preventDefault(); moveDir(DIRS[e.code]); return; }
+  if (e.code === 'KeyP') { togglePause(); return; }
+  if (e.code === 'KeyM') { toggleMute(); return; }
+  if (e.code === 'Enter' || e.code === 'Space') { ensureAudio(); }
+});
+let pStart = null;
+canvas.addEventListener('pointerdown', e => {
+  ensureAudio();
+  const r = canvas.getBoundingClientRect();
+  pStart = { x: e.clientX - r.left, y: e.clientY - r.top, t: performance.now() };
+});
+canvas.addEventListener('pointerup', e => {
+  if (!pStart) return;
+  const r = canvas.getBoundingClientRect();
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  const dx = x - pStart.x, dy = y - pStart.y, adx = Math.abs(dx), ady = Math.abs(dy);
+  pStart = null;
+  if (Math.max(adx, ady) >= 24) {              // swipe: dominant axis
+    moveDir(adx > ady ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
+  } else if (Math.max(adx, ady) < 12) {        // tap: step into a neighboring cell
+    const vx = x / (boardPx / V), vy = y / (boardPx / V);
+    const tc = Math.floor((vx - 166) / 64), tr = Math.floor((vy - 166) / 64);
+    if (tc >= 0 && tc < 3 && tr >= 0 && tr < 3) {
+      const dc = tc - player.col, dr = tr - player.row;
+      if (Math.abs(dc) + Math.abs(dr) === 1) move(dc, dr);
+    }
+  }
+});
+function togglePause() {
+  if (state === 'play') { state = 'pause'; pauseScr.style.display = 'flex'; }
+  else if (state === 'pause') { state = 'play'; pauseScr.style.display = 'none'; }
+  lastT = performance.now();
+}
+function toggleMute() {
+  muted = !muted;
+  localStorage.setItem('square_muted', muted ? '1' : '0');
+  applyMute();
+}
+pauseBtn.addEventListener('click', e => { e.stopPropagation(); ensureAudio(); togglePause(); });
+muteBtn.addEventListener('click', e => { e.stopPropagation(); ensureAudio(); toggleMute(); });
+pauseScr.addEventListener('click', () => togglePause());
+
+/* ---------- debug hook ---------- */
+window.__sq = {
+  get state() { return state; },
+  get score() { return score; },
+  get best() { return best; },
+  get player() { return { col: player.col, row: player.row, x: player.x, y: player.y }; },
+  get coins() { return coins.map(c => ({ col: c.col, row: c.row, x: c.x, y: c.y })); },
+  get enemies() { return enemies.map(e => ({ x: e.x, y: e.y, vx: e.vx, vy: e.vy, age: e.age })); },
+  get telegraphs() { return telegraphs.map(t => ({ ex: t.ex, ey: t.ey, t: t.t })); },
+  get muted() { return muted; },
+  get spawnDelay() { return spawnDelay(); },
+  get enemySpeed() { return enemySpeed(); },
+  start() { resetRun(); },
+  move(d) { moveDir(d); },
+  spawnCoinAt(col, row) { addCoin(col, row); },
+  spawnEnemyOnCourse() { spawnEnemyOnCourse(); },
+  pause() { togglePause(); }
+};
+
+resetRun();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
